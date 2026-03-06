@@ -1,18 +1,20 @@
 """
 audio_engine.py
-pygame.mixer + miniaudio を使った低遅延・同時発音対応の音声再生エンジン。
-ffmpeg / avconv などの外部バイナリに一切依存しない。
+pygame.mixer のみを使った低遅延・同時発音対応の音声再生エンジン。
 
-対応フォーマット:
-  - WAV (PCM, 8/16/24/32bit, mono/stereo)
-  - MP3 (miniaudio の純粋 C 実装デコーダを使用)
+【依存ライブラリ】
+  - pygame のみ（標準インストールに含まれる SDL_mixer を使用）
+  - ffmpeg / miniaudio / pydub などの外部ライブラリは一切不要
+
+【対応フォーマット】
+  - WAV  : pygame.mixer.Sound で直接読み込み
+  - MP3  : pygame.mixer.Sound で直接読み込み
+            （Windows版 pygame に内蔵された SDL_mixer の MP3 デコーダを使用）
 """
 
 import os
 import threading
 import pygame
-import miniaudio
-import numpy as np
 
 
 # pygame mixer の初期化（44100Hz, 16bit signed, ステレオ, バッファ256サンプル）
@@ -24,8 +26,8 @@ pygame.mixer.set_num_channels(32)  # 同時発音数
 class AudioEngine:
     """
     各パッドに対応した音声を管理する音声再生エンジン。
-    miniaudio でデコードした PCM データを pygame.mixer.Sound に変換し、
-    同時発音・個別音量制御を実現する。
+    pygame.mixer.Sound を使い、同時発音・個別音量制御を実現する。
+    外部バイナリ・C拡張ライブラリへの依存は一切ない。
     """
 
     def __init__(self, num_pads: int = 16):
@@ -46,8 +48,8 @@ class AudioEngine:
     def load_file(self, pad_index: int, file_path: str) -> bool:
         """
         指定パッドに音声ファイルを読み込む。
-        miniaudio で wav/mp3 を 44100Hz ステレオ 16bit PCM に統一デコードし、
-        pygame.mixer.Sound に変換する。ffmpeg 不要。
+        pygame.mixer.Sound がWAV/MP3を直接サポートしているため、
+        追加のデコードライブラリは不要。
         """
         if not os.path.isfile(file_path):
             print(f"[AudioEngine] File not found: {file_path}")
@@ -59,19 +61,9 @@ class AudioEngine:
             return False
 
         try:
-            # miniaudio でデコード（44100Hz, ステレオ, 16bit signed に統一）
-            decoded = miniaudio.decode_file(
-                file_path,
-                output_format=miniaudio.SampleFormat.SIGNED16,
-                nchannels=2,
-                sample_rate=44100,
-            )
-
-            # bytes -> numpy int16 array -> ステレオ形状 (N, 2)
-            arr = np.frombuffer(decoded.samples, dtype=np.int16).reshape(-1, 2)
-
-            # numpy array -> pygame Sound
-            sound = pygame.sndarray.make_sound(arr)
+            # pygame.mixer.Sound はWAV/MP3をネイティブサポート
+            # （SDL_mixer 内蔵デコーダ使用、ffmpeg不要）
+            sound = pygame.mixer.Sound(file_path)
 
             with self._lock:
                 self._sounds[pad_index] = sound
@@ -82,7 +74,7 @@ class AudioEngine:
             return True
 
         except Exception as e:
-            print(f"[AudioEngine] load_file error ({file_path}): {e}")
+            print(f"[AudioEngine] load_file error ({os.path.basename(file_path)}): {e}")
             return False
 
     # ------------------------------------------------------------------

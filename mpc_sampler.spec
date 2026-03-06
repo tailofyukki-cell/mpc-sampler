@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
-# MPC Sampler - PyInstaller spec (miniaudio版: ffmpeg不要)
+# MPC Sampler - PyInstaller spec
+# 依存: pygame + PyQt5 のみ（ffmpeg/miniaudio/pydub 不要）
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
 block_cipher = None
@@ -8,19 +9,16 @@ a = Analysis(
     ['main.py'],
     pathex=['.'],
     binaries=[
-        *collect_dynamic_libs('miniaudio'),
+        *collect_dynamic_libs('pygame'),
     ],
     datas=[
         *collect_data_files('pygame'),
-        *collect_data_files('miniaudio'),
     ],
     hiddenimports=[
         'pygame',
         'pygame.mixer',
-        'pygame.sndarray',
-        'miniaudio',
-        'numpy',
-        'numpy.core._multiarray_umath',
+        'pygame.time',
+        'pygame.display',
         'PyQt5',
         'PyQt5.QtWidgets',
         'PyQt5.QtCore',
@@ -28,12 +26,17 @@ a = Analysis(
         'json',
         'os',
         'threading',
+        'wave',
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        'pydub',  # ffmpeg依存のため除外
+        'pydub',
+        'miniaudio',
+        'cffi',
+        '_cffi_backend',
+        'numpy',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,

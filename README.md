@@ -37,7 +37,7 @@ Python 3.11 以上が必要です。
 
 ```bash
 # 必要なライブラリのインストール
-pip install pygame miniaudio numpy PyQt5 pyinstaller
+pip install pygame PyQt5 pyinstaller
 
 # 起動
 python main.py
@@ -57,7 +57,7 @@ Windows環境でビルドするには、以下の2つの方法があります。
 
 ```cmd
 # 1. 必要なライブラリのインストール
-python -m pip install pygame miniaudio numpy PyQt5 pyinstaller
+python -m pip install pygame PyQt5 pyinstaller
 
 # 2. ビルドの実行
 python -m PyInstaller --noconfirm mpc_sampler.spec
