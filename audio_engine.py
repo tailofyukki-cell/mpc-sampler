@@ -1,15 +1,21 @@
 """
 audio_engine.py
-pygame.mixer を使った低遅延・同時発音対応の音声再生エンジン
+pygame.mixer + miniaudio を使った低遅延・同時発音対応の音声再生エンジン。
+ffmpeg / avconv などの外部バイナリに一切依存しない。
+
+対応フォーマット:
+  - WAV (PCM, 8/16/24/32bit, mono/stereo)
+  - MP3 (miniaudio の純粋 C 実装デコーダを使用)
 """
 
 import os
 import threading
 import pygame
-from pydub import AudioSegment
+import miniaudio
+import numpy as np
 
 
-# pygame mixer の初期化（44100Hz, 16bit, ステレオ, バッファ256）
+# pygame mixer の初期化（44100Hz, 16bit signed, ステレオ, バッファ256サンプル）
 pygame.mixer.pre_init(44100, -16, 2, 256)
 pygame.mixer.init()
 pygame.mixer.set_num_channels(32)  # 同時発音数
@@ -17,8 +23,9 @@ pygame.mixer.set_num_channels(32)  # 同時発音数
 
 class AudioEngine:
     """
-    各パッドに対応した音声チャンネルを管理する音声再生エンジン。
-    pygame.mixer.Sound を使い、同時発音・個別音量制御を実現する。
+    各パッドに対応した音声を管理する音声再生エンジン。
+    miniaudio でデコードした PCM データを pygame.mixer.Sound に変換し、
+    同時発音・個別音量制御を実現する。
     """
 
     def __init__(self, num_pads: int = 16):
@@ -39,38 +46,44 @@ class AudioEngine:
     def load_file(self, pad_index: int, file_path: str) -> bool:
         """
         指定パッドに音声ファイルを読み込む。
-        mp3 は pydub で wav に変換してから pygame に渡す。
+        miniaudio で wav/mp3 を 44100Hz ステレオ 16bit PCM に統一デコードし、
+        pygame.mixer.Sound に変換する。ffmpeg 不要。
         """
         if not os.path.isfile(file_path):
+            print(f"[AudioEngine] File not found: {file_path}")
             return False
 
         ext = os.path.splitext(file_path)[1].lower()
+        if ext not in (".wav", ".mp3"):
+            print(f"[AudioEngine] Unsupported format: {ext}")
+            return False
+
         try:
-            if ext == ".mp3":
-                audio = AudioSegment.from_mp3(file_path)
-                wav_path = self._get_temp_wav_path(pad_index)
-                audio.export(wav_path, format="wav")
-                sound = pygame.mixer.Sound(wav_path)
-            elif ext == ".wav":
-                sound = pygame.mixer.Sound(file_path)
-            else:
-                return False
+            # miniaudio でデコード（44100Hz, ステレオ, 16bit signed に統一）
+            decoded = miniaudio.decode_file(
+                file_path,
+                output_format=miniaudio.SampleFormat.SIGNED16,
+                nchannels=2,
+                sample_rate=44100,
+            )
+
+            # bytes -> numpy int16 array -> ステレオ形状 (N, 2)
+            arr = np.frombuffer(decoded.samples, dtype=np.int16).reshape(-1, 2)
+
+            # numpy array -> pygame Sound
+            sound = pygame.sndarray.make_sound(arr)
 
             with self._lock:
                 self._sounds[pad_index] = sound
                 self._file_paths[pad_index] = file_path
                 vol = self._volumes.get(pad_index, 0.8)
                 sound.set_volume(vol * self._master_volume)
-            return True
-        except Exception as e:
-            print(f"[AudioEngine] load_file error: {e}")
-            return False
 
-    def _get_temp_wav_path(self, pad_index: int) -> str:
-        """一時変換用 wav ファイルパスを返す"""
-        temp_dir = os.path.join(os.path.dirname(__file__), "_temp")
-        os.makedirs(temp_dir, exist_ok=True)
-        return os.path.join(temp_dir, f"pad_{pad_index}.wav")
+            return True
+
+        except Exception as e:
+            print(f"[AudioEngine] load_file error ({file_path}): {e}")
+            return False
 
     # ------------------------------------------------------------------
     # 再生

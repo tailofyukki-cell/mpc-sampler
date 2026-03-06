@@ -37,7 +37,7 @@ Python 3.11 以上が必要です。
 
 ```bash
 # 必要なライブラリのインストール
-pip install pygame pydub PyQt5 pyinstaller
+pip install pygame miniaudio numpy PyQt5 pyinstaller
 
 # 起動
 python main.py

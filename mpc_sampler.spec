@@ -1,21 +1,26 @@
 # -*- mode: python ; coding: utf-8 -*-
-import sys
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+# MPC Sampler - PyInstaller spec (miniaudio版: ffmpeg不要)
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
 block_cipher = None
 
 a = Analysis(
     ['main.py'],
     pathex=['.'],
-    binaries=[],
+    binaries=[
+        *collect_dynamic_libs('miniaudio'),
+    ],
     datas=[
-        # pygame データファイルを含める
         *collect_data_files('pygame'),
+        *collect_data_files('miniaudio'),
     ],
     hiddenimports=[
         'pygame',
         'pygame.mixer',
-        'pydub',
+        'pygame.sndarray',
+        'miniaudio',
+        'numpy',
+        'numpy.core._multiarray_umath',
         'PyQt5',
         'PyQt5.QtWidgets',
         'PyQt5.QtCore',
@@ -27,7 +32,9 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        'pydub',  # ffmpeg依存のため除外
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -50,11 +57,10 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,          # GUIアプリ：コンソール非表示
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='icon.ico' if __import__('os').path.exists('icon.ico') else None,
 )
