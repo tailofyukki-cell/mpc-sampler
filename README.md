@@ -45,12 +45,24 @@ python main.py
 
 ## exe化手順（開発者向け）
 
-Windows環境で以下のコマンドを実行することで、単一の `.exe` ファイルをビルドできます。
+Windows環境でビルドするには、以下の2つの方法があります。
 
-```bash
-pyinstaller --noconfirm --onefile --windowed --name "MPCSampler" main.py
+### 方法1: 付属のバッチファイルを使用する（推奨）
+ソースコードと同じフォルダにある `build_windows.bat` をダブルクリックして実行してください。
+必要なライブラリのインストールからexe化まで自動で行われます。
+完了後、`dist` フォルダ内に `MPCSampler.exe` が生成されます。
+
+### 方法2: コマンドプロンプトで手動実行する
+「`pyinstaller` が認識されない」エラーを防ぐため、`python -m PyInstaller` を使用します。
+
+```cmd
+# 1. 必要なライブラリのインストール
+python -m pip install pygame miniaudio numpy PyQt5 pyinstaller
+
+# 2. ビルドの実行
+python -m PyInstaller --noconfirm mpc_sampler.spec
 ```
-※本リポジトリに含まれる `mpc_sampler.spec` を使用してビルドすることも可能です。
+完了後、`dist` フォルダ内に `MPCSampler.exe` が生成されます。
 
 ## ライセンス
 
