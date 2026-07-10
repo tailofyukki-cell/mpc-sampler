@@ -16,7 +16,7 @@ from PyQt5.QtWidgets import (
     QHBoxLayout, QLabel, QSlider, QPushButton,
     QFileDialog, QMessageBox, QFrame, QSizePolicy
 )
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt5.QtGui import QFont, QColor, QPalette, QKeySequence
 
 from audio_engine import AudioEngine
@@ -25,6 +25,24 @@ from settings_manager import SettingsManager, DEFAULT_KEYS
 
 NUM_PADS = 16
 GRID_COLS = 4
+
+
+class WavSaveWorker(QThread):
+    """
+    WAV ミックスダウン保存をバックグラウンドスレッドで実行するワーカー。
+    UIスレッドをブロックしないようにするためのクラス。
+    """
+    finished = pyqtSignal(bool, str)  # (success, save_path)
+
+    def __init__(self, engine, save_path: str, events: list):
+        super().__init__()
+        self._engine = engine
+        self._save_path = save_path
+        self._events = events
+
+    def run(self):
+        ok = self._engine.save_recording_as_wav(self._save_path, self._events)
+        self.finished.emit(ok, self._save_path)
 
 
 class MainWindow(QMainWindow):
@@ -467,9 +485,16 @@ class MainWindow(QMainWindow):
         if not save_path.lower().endswith(".wav"):
             save_path += ".wav"
 
-        # WAV ミックスダウン保存（stop_recording()で取得した events を直接渡す）
-        self._set_status("WAV を保存中...")
-        ok = self._engine.save_recording_as_wav(save_path, events)
+        # WAV ミックスダウン保存 — QThread でバックグラウンド実行（UIブロック防止）
+        self._set_status("WAV を保存中...しばらくお待ちください")
+        self._rec_start_btn.setEnabled(False)  # 保存完了まで操作禁止
+        self._wav_worker = WavSaveWorker(self._engine, save_path, events)
+        self._wav_worker.finished.connect(self._on_wav_save_done)
+        self._wav_worker.start()
+
+    def _on_wav_save_done(self, ok: bool, save_path: str):
+        """バックグラウンドWAV保存完了時のコールバック"""
+        self._rec_start_btn.setEnabled(True)  # 操作制限を解除
         if ok:
             self._set_status(f"録音保存完了 → {os.path.basename(save_path)}")
             QMessageBox.information(self, "録音保存完了",
