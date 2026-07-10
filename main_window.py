@@ -2,12 +2,12 @@
 main_window.py
 MPC Sampler メインウィンドウ（PyQt5）
 
-v1.2 変更点:
-  - トグル再生: 再生中のパッドを押すと停止、停止中なら再生
-  - 録音開始ボタン / 録音停止ボタン
-  - 録音中は赤いインジケーターと経過時間タイマーを表示
-  - 録音停止後に WAV 保存ダイアログを表示
-  - バグ修正: stop_recording() 後に save_recording_as_wav() が失敗する問題を修正
+v1.4 変更点:
+  - 録音処理の根本的な再設計（audio_engine.py v1.4 と連携）
+  - WavSaveWorker のライフサイクル管理を強化（保存中の多重起動防止）
+  - closeEvent で保存中スレッドを安全に待機してから終了
+  - 保存中は録音開始・停止ボタン両方を無効化
+  - タイトルバーのバージョン表記を v1.4 に更新
 """
 
 import os
@@ -34,14 +34,18 @@ class WavSaveWorker(QThread):
     """
     finished = pyqtSignal(bool, str)  # (success, save_path)
 
-    def __init__(self, engine, save_path: str, events: list):
+    def __init__(self, engine: AudioEngine, save_path: str, events: list):
         super().__init__()
         self._engine = engine
         self._save_path = save_path
-        self._events = events
+        self._events = list(events)  # 完全なコピーを保持
 
     def run(self):
-        ok = self._engine.save_recording_as_wav(self._save_path, self._events)
+        try:
+            ok = self._engine.save_recording_as_wav(self._save_path, self._events)
+        except Exception as e:
+            print(f"[WavSaveWorker] 予期しないエラー: {e}")
+            ok = False
         self.finished.emit(ok, self._save_path)
 
 
@@ -53,7 +57,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("MPC Sampler v1.2")
+        self.setWindowTitle("MPC Sampler v1.4")
         self.setMinimumSize(680, 640)
 
         self._engine = AudioEngine(NUM_PADS)
@@ -67,6 +71,9 @@ class MainWindow(QMainWindow):
         self._rec_timer = QTimer()
         self._rec_timer.setInterval(100)  # 100ms ごとに更新
         self._rec_timer.timeout.connect(self._update_rec_display)
+
+        # WavSaveWorker の参照（保存中の多重起動防止・終了時の待機用）
+        self._wav_worker: WavSaveWorker | None = None
 
         self._build_ui()
         self._apply_dark_theme()
@@ -428,6 +435,12 @@ class MainWindow(QMainWindow):
     # ==================================================================
     def _on_rec_start(self):
         """録音開始ボタン押下"""
+        # 保存中は録音開始不可
+        if self._wav_worker is not None and self._wav_worker.isRunning():
+            QMessageBox.information(self, "録音開始不可",
+                                    "WAVファイルの保存が完了するまでお待ちください。")
+            return
+
         self._engine.start_recording()
 
         # UI 更新
@@ -453,7 +466,7 @@ class MainWindow(QMainWindow):
         self._rec_timer.stop()
 
         # UI リセット
-        self._rec_start_btn.setEnabled(True)
+        self._rec_start_btn.setEnabled(False)  # 保存完了まで無効のまま
         self._rec_start_btn.setStyleSheet(self._btn_style_rec_start())
         self._rec_stop_btn.setEnabled(False)
         self._rec_stop_btn.setStyleSheet(self._btn_style_rec_stop(enabled=False))
@@ -463,6 +476,7 @@ class MainWindow(QMainWindow):
 
         if not events:
             self._set_status("録音停止（イベントなし）")
+            self._rec_start_btn.setEnabled(True)  # イベントなし時は即座に解除
             QMessageBox.information(self, "録音停止",
                                     "録音中にパッドが押されませんでした。\nWAVファイルは保存されませんでした。")
             return
@@ -480,6 +494,7 @@ class MainWindow(QMainWindow):
         )
         if not save_path:
             self._set_status("録音保存をキャンセルしました")
+            self._rec_start_btn.setEnabled(True)  # キャンセル時は即座に解除
             return
 
         if not save_path.lower().endswith(".wav"):
@@ -487,13 +502,12 @@ class MainWindow(QMainWindow):
 
         # WAV ミックスダウン保存 — QThread でバックグラウンド実行（UIブロック防止）
         self._set_status("WAV を保存中...しばらくお待ちください")
-        self._rec_start_btn.setEnabled(False)  # 保存完了まで操作禁止
         self._wav_worker = WavSaveWorker(self._engine, save_path, events)
         self._wav_worker.finished.connect(self._on_wav_save_done)
         self._wav_worker.start()
 
     def _on_wav_save_done(self, ok: bool, save_path: str):
-        """バックグラウンドWAV保存完了時のコールバック"""
+        """バックグラウンドWAV保存完了時のコールバック（UIスレッドで実行される）"""
         self._rec_start_btn.setEnabled(True)  # 操作制限を解除
         if ok:
             self._set_status(f"録音保存完了 → {os.path.basename(save_path)}")
@@ -502,7 +516,8 @@ class MainWindow(QMainWindow):
         else:
             self._set_status("録音保存に失敗しました")
             QMessageBox.warning(self, "保存エラー",
-                                "WAVファイルの保存に失敗しました。\n音声ファイルが割り当てられているか確認してください。")
+                                "WAVファイルの保存に失敗しました。\n"
+                                "音声ファイルが割り当てられているか確認してください。")
 
     def _update_rec_display(self):
         """録音中の UI 更新（タイマーから呼ばれる）"""
@@ -547,6 +562,11 @@ class MainWindow(QMainWindow):
         # 録音中なら停止
         if self._engine.is_recording():
             self._engine.stop_recording()
+
+        # 保存中スレッドが動いていれば完了を待つ（最大5秒）
+        if self._wav_worker is not None and self._wav_worker.isRunning():
+            self._wav_worker.wait(5000)
+
         # 終了時に自動保存
         self._settings = self._collect_settings()
         self._settings_mgr.save(self._settings)
