@@ -223,9 +223,9 @@ class AudioEngine:
         total_duration = max_ts + max_sound_len + 1.0
         total_frames = int(total_duration * SAMPLE_RATE)
 
-        # ミックスバッファ（ステレオ、float）
-        mix_left = [0.0] * total_frames
-        mix_right = [0.0] * total_frames
+        # ミックスバッファ（numpy float64、ステレオ）
+        import numpy as np
+        mix = np.zeros((total_frames, 2), dtype=np.float64)
 
         for pad_idx, ts in events:
             snd = self._sounds.get(pad_idx)
@@ -235,39 +235,35 @@ class AudioEngine:
             vol = self._volumes.get(pad_idx, 0.8) * self._master_volume
 
             try:
-                import pygame.sndarray
-                arr = pygame.sndarray.array(snd)
+                # get_raw() でバイト列を取得し numpy 配列に変換
+                raw_bytes = snd.get_raw()
+                n_frames = len(raw_bytes) // (SAMPLE_WIDTH * CHANNELS)
+                if n_frames == 0:
+                    continue
+                # int16 として解釈し (n_frames, 2) に reshape
+                arr = np.frombuffer(raw_bytes, dtype=np.int16).reshape(n_frames, CHANNELS).astype(np.float64)
             except Exception as e:
-                print(f"[AudioEngine] sndarray error: {e}")
+                print(f"[AudioEngine] get_raw error pad={pad_idx}: {e}")
                 continue
 
             start_frame = int(ts * SAMPLE_RATE)
-            num_frames = min(len(arr), total_frames - start_frame)
-            if num_frames <= 0:
+            end_frame = min(start_frame + n_frames, total_frames)
+            length = end_frame - start_frame
+            if length <= 0:
                 continue
 
-            for f in range(num_frames):
-                sample = arr[f]
-                if arr.ndim == 2:
-                    mix_left[start_frame + f] += (sample[0] / 32768.0) * vol
-                    mix_right[start_frame + f] += (sample[1] / 32768.0) * vol
-                else:
-                    v = (sample / 32768.0) * vol
-                    mix_left[start_frame + f] += v
-                    mix_right[start_frame + f] += v
+            mix[start_frame:end_frame] += arr[:length] * (vol / 32768.0)
 
-        def clamp(v):
-            return max(-1.0, min(1.0, v))
+        # クリッピング → int16 変換
+        mix = np.clip(mix, -1.0, 1.0)
+        mix_int16 = (mix * 32767).astype(np.int16)
 
         try:
             with wave.open(output_path, "wb") as wf:
                 wf.setnchannels(CHANNELS)
                 wf.setsampwidth(SAMPLE_WIDTH)
                 wf.setframerate(SAMPLE_RATE)
-                for f in range(total_frames):
-                    l_val = int(clamp(mix_left[f]) * 32767)
-                    r_val = int(clamp(mix_right[f]) * 32767)
-                    wf.writeframes(struct.pack("<hh", l_val, r_val))
+                wf.writeframes(mix_int16.tobytes())
             print(f"[AudioEngine] WAV保存完了: {output_path}")
             return True
         except Exception as e:
