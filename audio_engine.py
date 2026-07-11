@@ -192,14 +192,22 @@ class AudioEngine:
     def stop_recording(self) -> list[tuple[int, float]]:
         """
         録音を停止し、記録されたイベントリストのコピーを返す。
+        停止ボタンを押した瞬間に再生中の全チャンネルを停止する。
         戻り値: [(pad_index, timestamp_sec), ...]
-        停止後は内部イベントリストをクリアする。
         """
         self._recording = False
+
+        # 停止ボタンのタイミングで再生中の全チャンネルを即座に停止
+        with self._lock:
+            for pad_idx, ch in list(self._channels.items()):
+                if ch is not None and ch.get_busy():
+                    ch.stop()
+                self._channels[pad_idx] = None
+
         with self._events_lock:
             events = list(self._record_events)  # 完全なコピー
             self._record_events.clear()
-        print(f"[AudioEngine] 録音停止 ({len(events)} イベント)")
+        print(f"[AudioEngine] 録音停止 ({len(events)} イベント)、全チャンネル停止")
         return events
 
     def is_recording(self) -> bool:
