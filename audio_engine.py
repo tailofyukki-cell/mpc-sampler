@@ -25,8 +25,8 @@ import os
 import time
 import wave
 import threading
-import numpy as np
 import pygame
+# numpy は save_recording_as_wav() 内でのみインポート（PyInstaller excludes 対応）
 
 
 # pygame mixer の初期化（44100Hz, 16bit signed, ステレオ, バッファ256サンプル）
@@ -92,6 +92,7 @@ class AudioEngine:
             sound = pygame.mixer.Sound(file_path)
 
             # ロード時に get_raw() を呼んでキャッシュ（メインスレッドで安全に実行）
+            import numpy as np
             raw_bytes = sound.get_raw()
             n_frames = len(raw_bytes) // (SAMPLE_WIDTH * CHANNELS)
             if n_frames > 0:
@@ -250,6 +251,7 @@ class AudioEngine:
         total_frames = max(int(total_duration * SAMPLE_RATE), SAMPLE_RATE)  # 最低1秒
 
         # ミックスバッファ（numpy float64、ステレオ）
+        import numpy as np
         mix = np.zeros((total_frames, CHANNELS), dtype=np.float64)
 
         for pad_idx, ts in events:
