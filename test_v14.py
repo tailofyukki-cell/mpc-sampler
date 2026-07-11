@@ -96,10 +96,10 @@ with ENGINE._events_lock:
     ENGINE._record_events.append((0, 0.0))
     ENGINE._record_events.append((1, 0.2))
 
-events_t2 = ENGINE.stop_recording()
+events_t2, stop_time_t2 = ENGINE.stop_recording()
 check("録音イベント数 == 2", len(events_t2) == 2, f"実際: {len(events_t2)}")
 
-ok = ENGINE.save_recording_as_wav(out_path_t2, events_t2)
+ok = ENGINE.save_recording_as_wav(out_path_t2, events_t2, stop_time_t2)
 check("save_recording_as_wav 成功", ok)
 check("出力ファイルが存在する", os.path.isfile(out_path_t2))
 
@@ -138,7 +138,7 @@ try:
         results["ok"] = ok
         results["path"] = path
 
-    worker = WavSaveWorker(ENGINE, out_path_t4, events_t4)
+    worker = WavSaveWorker(ENGINE, out_path_t4, events_t4, 5.0)
     worker.finished.connect(on_done)
     worker.start()
     worker.wait(10000)  # 最大10秒待機
@@ -179,7 +179,7 @@ for t in threads:
 for t in threads:
     t.join()
 
-events_t5 = ENGINE.stop_recording()
+events_t5, stop_time_t5 = ENGINE.stop_recording()
 check("並行アクセス後もイベント記録が正常", len(events_t5) >= 0)
 
 out_path_t5 = os.path.join(TMPDIR, "concurrent.wav")

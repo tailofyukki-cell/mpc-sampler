@@ -34,15 +34,16 @@ class WavSaveWorker(QThread):
     """
     finished = pyqtSignal(bool, str)  # (success, save_path)
 
-    def __init__(self, engine: AudioEngine, save_path: str, events: list):
+    def __init__(self, engine: AudioEngine, save_path: str, events: list, stop_time: float):
         super().__init__()
         self._engine = engine
         self._save_path = save_path
         self._events = list(events)  # 完全なコピーを保持
+        self._stop_time = stop_time
 
     def run(self):
         try:
-            ok = self._engine.save_recording_as_wav(self._save_path, self._events)
+            ok = self._engine.save_recording_as_wav(self._save_path, self._events, self._stop_time)
         except Exception as e:
             print(f"[WavSaveWorker] 予期しないエラー: {e}")
             ok = False
@@ -460,7 +461,8 @@ class MainWindow(QMainWindow):
 
     def _on_rec_stop(self):
         """録音停止ボタン押下"""
-        events = self._engine.stop_recording()
+        # stop_time = 停止ボタンを押した瞬間の録音経過時間（WAVの切り取り終端）
+        events, stop_time = self._engine.stop_recording()
 
         # タイマー停止
         self._rec_timer.stop()
@@ -481,7 +483,7 @@ class MainWindow(QMainWindow):
                                     "録音中にパッドが押されませんでした。\nWAVファイルは保存されませんでした。")
             return
 
-        self._set_status(f"録音停止（{len(events)} イベント）")
+        self._set_status(f"録音停止（{len(events)} イベント, {stop_time:.1f}秒）")
 
         # 保存先ダイアログ
         default_dir = os.path.expanduser("~/Documents")
@@ -502,7 +504,7 @@ class MainWindow(QMainWindow):
 
         # WAV ミックスダウン保存 — QThread でバックグラウンド実行（UIブロック防止）
         self._set_status("WAV を保存中...しばらくお待ちください")
-        self._wav_worker = WavSaveWorker(self._engine, save_path, events)
+        self._wav_worker = WavSaveWorker(self._engine, save_path, events, stop_time)
         self._wav_worker.finished.connect(self._on_wav_save_done)
         self._wav_worker.start()
 

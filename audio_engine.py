@@ -189,12 +189,16 @@ class AudioEngine:
         self._recording = True
         print("[AudioEngine] 録音開始")
 
-    def stop_recording(self) -> list[tuple[int, float]]:
+    def stop_recording(self) -> tuple[list[tuple[int, float]], float]:
         """
-        録音を停止し、記録されたイベントリストのコピーを返す。
+        録音を停止し、記録されたイベントリストと録音時間（秒）のタプルを返す。
         停止ボタンを押した瞬間に再生中の全チャンネルを停止する。
-        戻り値: [(pad_index, timestamp_sec), ...]
+        戻り値: (events, stop_time_sec)
+          events: [(pad_index, timestamp_sec), ...]
+          stop_time_sec: 録音開始から停止までの秒数（WAVの切り取り終端）
         """
+        # 停止タイムスタンプを即座に記録
+        stop_time = time.monotonic() - self._record_start_time
         self._recording = False
 
         # 停止ボタンのタイミングで再生中の全チャンネルを即座に停止
@@ -207,8 +211,8 @@ class AudioEngine:
         with self._events_lock:
             events = list(self._record_events)  # 完全なコピー
             self._record_events.clear()
-        print(f"[AudioEngine] 録音停止 ({len(events)} イベント)、全チャンネル停止")
-        return events
+        print(f"[AudioEngine] 録音停止 ({len(events)} イベント, 録音時間={stop_time:.3f}s)")
+        return events, stop_time
 
     def is_recording(self) -> bool:
         return self._recording
@@ -219,14 +223,20 @@ class AudioEngine:
             return time.monotonic() - self._record_start_time
         return 0.0
 
-    def save_recording_as_wav(self, output_path: str, events: list[tuple[int, float]]) -> bool:
+    def save_recording_as_wav(
+        self,
+        output_path: str,
+        events: list[tuple[int, float]],
+        stop_time: float | None = None,
+    ) -> bool:
         """
         録音イベントを WAV ファイルとしてミックスダウン保存する。
-        各パッドの音声をタイムスタンプ位置に配置してミックスする。
+        stop_time を指定すると、その時刻でWAVを切り取る（停止ボタンのタイミングで切り取る）。
 
         Args:
             output_path: 保存先パス
             events: 録音イベントリスト [(pad_index, timestamp_sec), ...]
+            stop_time: 録音停止時刻（秒）。None の場合は最後の音が鳳り終わるまで保存。
 
         Returns:
             True: 保存成功
@@ -241,6 +251,9 @@ class AudioEngine:
             raw_cache_snapshot = {k: v for k, v in self._raw_cache.items()}
             volumes_snapshot = {k: v for k, v in self._volumes.items()}
             master_vol = self._master_volume
+
+        # stop_time が指定されている場合はその時刻でWAVを切り取る
+        stop_frame = int(stop_time * SAMPLE_RATE) if stop_time is not None else None
 
         # 必要な総フレーム数を計算
         max_ts = max(ts for _, ts in events)
@@ -258,6 +271,13 @@ class AudioEngine:
         total_duration = max_ts + max_sound_sec + 1.0
         total_frames = max(int(total_duration * SAMPLE_RATE), SAMPLE_RATE)  # 最低1秒
 
+        # stop_time で切り取る場合は total_frames を上書き
+        if stop_frame is not None:
+            total_frames = min(total_frames, stop_frame)
+            if total_frames <= 0:
+                print("[AudioEngine] stop_time が 0 以下のため保存スキップ")
+                return False
+
         # ミックスバッファ（numpy float64、ステレオ）
         import numpy as np
         mix = np.zeros((total_frames, CHANNELS), dtype=np.float64)
@@ -271,7 +291,7 @@ class AudioEngine:
             n_frames = len(arr)
 
             start_frame = int(ts * SAMPLE_RATE)
-            end_frame = min(start_frame + n_frames, total_frames)
+            end_frame = min(start_frame + n_frames, total_frames)  # stop_frame で自動クリップ
             length = end_frame - start_frame
             if length <= 0:
                 continue
